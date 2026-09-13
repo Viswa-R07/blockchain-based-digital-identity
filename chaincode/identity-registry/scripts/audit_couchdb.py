@@ -49,6 +49,8 @@ CREDENTIAL_APPROVED_FIELDS = {
     "issuedAt",
     "expiresAt",
     "status",
+    "revocationReason",
+    "revokedAt",
     "createdAt",
     "updatedAt",
     "version",
@@ -56,6 +58,7 @@ CREDENTIAL_APPROVED_FIELDS = {
 
 COMMITMENT_REGEX = re.compile(r"^[a-f0-9]{64}$")
 DID_REGEX = re.compile(r"^did:[a-zA-Z0-9]+:[a-zA-Z0-9_:.-]+$")
+ISO_DATE_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$")
 ALLOWED_STATUSES = {"ACTIVE", "SUSPENDED", "REVOKED"}
 ALLOWED_ORGS = {"GovMSP", "UniversityMSP", "BankMSP", "EmployerMSP"}
 ALLOWED_CRED_TYPES = {
@@ -63,6 +66,14 @@ ALLOWED_CRED_TYPES = {
     "AcademicDegreeCredential",
     "KYCCredential",
     "EmploymentCredential",
+}
+ALLOWED_REVOCATION_REASONS = {
+    "KEY_COMPROMISE",
+    "AFFILIATION_CHANGED",
+    "SUPERSEDED",
+    "CESSATION_OF_OPERATION",
+    "PRIVILEGE_WITHDRAWN",
+    "UNSPECIFIED",
 }
 
 def audit_all_couchdbs():
@@ -139,6 +150,17 @@ def audit_all_couchdbs():
                     print(f"  [!] FAIL: Invalid issuerOrg '{issuer_org}' in doc {doc_id} on {name}")
                     all_passed = False
 
+                # Optional revocation metadata
+                rev_reason = doc.get("revocationReason")
+                if rev_reason is not None and rev_reason not in ALLOWED_REVOCATION_REASONS:
+                    print(f"  [!] FAIL: Invalid revocationReason '{rev_reason}' in doc {doc_id} on {name}")
+                    all_passed = False
+
+                rev_at = doc.get("revokedAt")
+                if rev_at is not None and not ISO_DATE_REGEX.match(rev_at):
+                    print(f"  [!] FAIL: Invalid revokedAt timestamp '{rev_at}' in doc {doc_id} on {name}")
+                    all_passed = False
+
                 version = doc.get("version")
                 if not isinstance(version, int) or version < 1:
                     print(f"  [!] FAIL: Invalid version '{version}' in doc {doc_id} on {name}")
@@ -190,7 +212,7 @@ def audit_all_couchdbs():
     print(f"=== Completed Audit across {len(COUCH_INSTANCES)} CouchDB Instances ===")
     print(f"Total document inspections: {total_docs_seen}")
     if all_passed:
-        print("[PASS] All CouchDB instances verified: Zero Raw PII and strict schema compliance across all 8 nodes.")
+        print("[PASS] All CouchDB instances verified: No raw PII fields or detected PII-keyword fields were present in the audited ledger documents, and strict schema compliance verified across all 8 nodes.")
         return 0
     else:
         print("[FAIL] Audit discovered schema violations or raw PII!")

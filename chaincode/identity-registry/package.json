@@ -1,6 +1,6 @@
 {
   "name": "identity-registry",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Identity Registry Chaincode for Blockchain-Based Digital Identity Verification System",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",

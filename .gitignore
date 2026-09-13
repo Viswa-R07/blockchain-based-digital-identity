@@ -68,7 +68,21 @@ yarn-error.log*
 .env
 .env.*
 *.env
+!.env.example
+!**/.env.example
 secrets/
+
+
+# ------------------------------------------------------------------------------
+# 4b. Milestone 8 Off-Chain Encrypted Credential Storage
+# ------------------------------------------------------------------------------
+storage/
+**/storage/
+backend/storage/
+*.enc
+*.enc.json
+*.tmp
+
 
 # ------------------------------------------------------------------------------
 # 5. Fabric Platform Binaries & Samples (Downloaded via bootstrap)

@@ -5,7 +5,7 @@
 import { Context, Contract, Info, Returns, Transaction } from 'fabric-contract-api';
 import stringify from 'json-stringify-deterministic';
 import sortKeysRecursive from 'sort-keys-recursive';
-import { CredentialRecord, CredentialStatus, VerificationResult } from './models/credentialRecord';
+import { CredentialRecord, CredentialStatus, CredentialStatusResult, RevocationReason, VerificationResult } from './models/credentialRecord';
 import { IdentityRecord, IdentityStatus } from './models/identityRecord';
 import {
     parseAndValidateCredentialStatus,
@@ -14,6 +14,7 @@ import {
     validateCredentialType,
     validateExpiresAt,
     validateIssuerOrganization,
+    validateRevocationReason,
     validateSchemaId
 } from './utils/credentialValidation';
 import { ChaincodeError, ErrorCode } from './utils/errors';
@@ -408,7 +409,282 @@ export class IdentityRegistryContract extends Contract {
     }
 
     /**
-     * Updates the status of an existing credential record.
+     * Explicit lifecycle method: Permanently revokes an active or suspended credential.
+     * Controlled application revocation reason codes are strictly enforced.
+     * Restricted strictly to the original issuing organization (record.issuerOrg).
+     * Revocation is a permanent terminal state: once revoked, the credential cannot be reinstated or suspended.
+     *
+     * @param ctx Fabric transaction context
+     * @param credentialId Unique credential identifier
+     * @param reason Controlled application revocation reason code
+     * @returns JSON-serialized updated CredentialRecord
+     */
+    @Transaction()
+    @Returns('string')
+    public async RevokeCredential(
+        ctx: Context,
+        credentialId: string,
+        reason: string
+    ): Promise<string> {
+        validateCredentialId(credentialId);
+        const validatedReason = validateRevocationReason(reason);
+
+        // 1. Retrieve Current Record
+        const compositeKey = ctx.stub.createCompositeKey(CREDENTIAL_OBJECT_TYPE, [credentialId.trim()]);
+        const recordBytes = await ctx.stub.getState(compositeKey);
+
+        if (!recordBytes || recordBytes.length === 0) {
+            throw new ChaincodeError(
+                ErrorCode.CREDENTIAL_NOT_FOUND,
+                `Credential record for ID "${credentialId}" does not exist on the ledger.`
+            );
+        }
+
+        const record: CredentialRecord = JSON.parse(Buffer.from(recordBytes).toString('utf8'));
+
+        // 2. ABAC Authorization: strictly original issuerOrg
+        const callerMsp = ctx.clientIdentity.getMSPID();
+        if (callerMsp !== record.issuerOrg) {
+            throw new ChaincodeError(
+                ErrorCode.UNAUTHORIZED,
+                `Caller organization "${callerMsp}" is not authorized to revoke credential "${credentialId}". Required issuer organization: ${record.issuerOrg}.`
+            );
+        }
+
+        // 3. Lifecycle validation: must be ACTIVE or SUSPENDED. Cannot revoke if already REVOKED.
+        if (record.status === CredentialStatus.REVOKED) {
+            throw new ChaincodeError(
+                ErrorCode.CREDENTIAL_REVOCATION_IS_TERMINAL,
+                'Cannot update status of a credential that is REVOKED. Revocation is a permanent terminal state.'
+            );
+        }
+
+        const previousStatus = record.status;
+        const txTimestamp = getTxTimestampISO(ctx);
+
+        // 4. Update mutable state & attach controlled revocation metadata
+        record.status = CredentialStatus.REVOKED;
+        record.revocationReason = validatedReason;
+        record.revokedAt = txTimestamp;
+        record.updatedAt = txTimestamp;
+        record.version += 1;
+
+        // 5. Commit to ledger
+        const updatedBytes = Buffer.from(stringify(sortKeysRecursive(record)));
+        await ctx.stub.putState(compositeKey, updatedBytes);
+
+        // 6. Emit specialized CredentialRevoked event (zero PII, non-sensitive audit metadata)
+        const revokedEventPayload = {
+            credentialId: record.credentialId,
+            issuerOrg: record.issuerOrg,
+            previousStatus,
+            revocationReason: record.revocationReason,
+            revokedAt: record.revokedAt,
+            version: record.version
+        };
+        ctx.stub.setEvent('CredentialRevoked', Buffer.from(JSON.stringify(revokedEventPayload)));
+
+        // Also emit generic CredentialStatusUpdated for backward compatibility
+        const statusUpdatedPayload = {
+            credentialId: record.credentialId,
+            previousStatus,
+            newStatus: record.status,
+            issuerOrg: record.issuerOrg,
+            timestamp: txTimestamp,
+            version: record.version
+        };
+        ctx.stub.setEvent('CredentialStatusUpdated', Buffer.from(JSON.stringify(statusUpdatedPayload)));
+
+        return JSON.stringify(record);
+    }
+
+    /**
+     * Explicit lifecycle method: Temporarily suspends an active credential.
+     * Restricted strictly to the original issuing organization (record.issuerOrg).
+     * Does not populate revokedAt or mark terminal revocation.
+     *
+     * @param ctx Fabric transaction context
+     * @param credentialId Unique credential identifier
+     * @param reason Controlled application reason code
+     * @returns JSON-serialized updated CredentialRecord
+     */
+    @Transaction()
+    @Returns('string')
+    public async SuspendCredential(
+        ctx: Context,
+        credentialId: string,
+        reason: string
+    ): Promise<string> {
+        validateCredentialId(credentialId);
+        const validatedReason = validateRevocationReason(reason);
+
+        // 1. Retrieve Current Record
+        const compositeKey = ctx.stub.createCompositeKey(CREDENTIAL_OBJECT_TYPE, [credentialId.trim()]);
+        const recordBytes = await ctx.stub.getState(compositeKey);
+
+        if (!recordBytes || recordBytes.length === 0) {
+            throw new ChaincodeError(
+                ErrorCode.CREDENTIAL_NOT_FOUND,
+                `Credential record for ID "${credentialId}" does not exist on the ledger.`
+            );
+        }
+
+        const record: CredentialRecord = JSON.parse(Buffer.from(recordBytes).toString('utf8'));
+
+        // 2. ABAC Authorization: strictly original issuerOrg
+        const callerMsp = ctx.clientIdentity.getMSPID();
+        if (callerMsp !== record.issuerOrg) {
+            throw new ChaincodeError(
+                ErrorCode.UNAUTHORIZED,
+                `Caller organization "${callerMsp}" is not authorized to suspend credential "${credentialId}". Required issuer organization: ${record.issuerOrg}.`
+            );
+        }
+
+        // 3. Lifecycle validation
+        if (record.status === CredentialStatus.REVOKED) {
+            throw new ChaincodeError(
+                ErrorCode.CREDENTIAL_REVOCATION_IS_TERMINAL,
+                'Cannot update status of a credential that is REVOKED. Revocation is a permanent terminal state.'
+            );
+        }
+
+        if (record.status === CredentialStatus.SUSPENDED) {
+            throw new ChaincodeError(
+                ErrorCode.NOOP_STATUS_TRANSITION,
+                'Credential is already in status SUSPENDED. No-op status transitions are rejected.'
+            );
+        }
+
+        const previousStatus = record.status;
+        const txTimestamp = getTxTimestampISO(ctx);
+
+        // 4. Update mutable state (do NOT set revokedAt)
+        record.status = CredentialStatus.SUSPENDED;
+        record.updatedAt = txTimestamp;
+        record.version += 1;
+
+        // 5. Commit to ledger
+        const updatedBytes = Buffer.from(stringify(sortKeysRecursive(record)));
+        await ctx.stub.putState(compositeKey, updatedBytes);
+
+        // 6. Emit specialized CredentialSuspended event
+        const suspendedEventPayload = {
+            credentialId: record.credentialId,
+            issuerOrg: record.issuerOrg,
+            previousStatus,
+            reason: validatedReason,
+            timestamp: txTimestamp,
+            version: record.version
+        };
+        ctx.stub.setEvent('CredentialSuspended', Buffer.from(JSON.stringify(suspendedEventPayload)));
+
+        // Also emit generic CredentialStatusUpdated
+        const statusUpdatedPayload = {
+            credentialId: record.credentialId,
+            previousStatus,
+            newStatus: record.status,
+            issuerOrg: record.issuerOrg,
+            timestamp: txTimestamp,
+            version: record.version
+        };
+        ctx.stub.setEvent('CredentialStatusUpdated', Buffer.from(JSON.stringify(statusUpdatedPayload)));
+
+        return JSON.stringify(record);
+    }
+
+    /**
+     * Explicit lifecycle method: Reinstates a suspended credential back to ACTIVE status.
+     * Restricted strictly to the original issuing organization (record.issuerOrg).
+     * Cannot reinstate a REVOKED credential (terminal state).
+     *
+     * @param ctx Fabric transaction context
+     * @param credentialId Unique credential identifier
+     * @returns JSON-serialized updated CredentialRecord
+     */
+    @Transaction()
+    @Returns('string')
+    public async ReinstateCredential(
+        ctx: Context,
+        credentialId: string
+    ): Promise<string> {
+        validateCredentialId(credentialId);
+
+        // 1. Retrieve Current Record
+        const compositeKey = ctx.stub.createCompositeKey(CREDENTIAL_OBJECT_TYPE, [credentialId.trim()]);
+        const recordBytes = await ctx.stub.getState(compositeKey);
+
+        if (!recordBytes || recordBytes.length === 0) {
+            throw new ChaincodeError(
+                ErrorCode.CREDENTIAL_NOT_FOUND,
+                `Credential record for ID "${credentialId}" does not exist on the ledger.`
+            );
+        }
+
+        const record: CredentialRecord = JSON.parse(Buffer.from(recordBytes).toString('utf8'));
+
+        // 2. ABAC Authorization: strictly original issuerOrg
+        const callerMsp = ctx.clientIdentity.getMSPID();
+        if (callerMsp !== record.issuerOrg) {
+            throw new ChaincodeError(
+                ErrorCode.UNAUTHORIZED,
+                `Caller organization "${callerMsp}" is not authorized to reinstate credential "${credentialId}". Required issuer organization: ${record.issuerOrg}.`
+            );
+        }
+
+        // 3. Lifecycle validation
+        if (record.status === CredentialStatus.REVOKED) {
+            throw new ChaincodeError(
+                ErrorCode.CREDENTIAL_REVOCATION_IS_TERMINAL,
+                'Cannot update status of a credential that is REVOKED. Revocation is a permanent terminal state.'
+            );
+        }
+
+        if (record.status === CredentialStatus.ACTIVE) {
+            throw new ChaincodeError(
+                ErrorCode.NOOP_STATUS_TRANSITION,
+                'Credential is already in status ACTIVE. No-op status transitions are rejected.'
+            );
+        }
+
+        const previousStatus = record.status;
+        const txTimestamp = getTxTimestampISO(ctx);
+
+        // 4. Update mutable state
+        record.status = CredentialStatus.ACTIVE;
+        record.updatedAt = txTimestamp;
+        record.version += 1;
+
+        // 5. Commit to ledger
+        const updatedBytes = Buffer.from(stringify(sortKeysRecursive(record)));
+        await ctx.stub.putState(compositeKey, updatedBytes);
+
+        // 6. Emit specialized CredentialReinstated event
+        const reinstatedEventPayload = {
+            credentialId: record.credentialId,
+            issuerOrg: record.issuerOrg,
+            previousStatus,
+            timestamp: txTimestamp,
+            version: record.version
+        };
+        ctx.stub.setEvent('CredentialReinstated', Buffer.from(JSON.stringify(reinstatedEventPayload)));
+
+        // Also emit generic CredentialStatusUpdated
+        const statusUpdatedPayload = {
+            credentialId: record.credentialId,
+            previousStatus,
+            newStatus: record.status,
+            issuerOrg: record.issuerOrg,
+            timestamp: txTimestamp,
+            version: record.version
+        };
+        ctx.stub.setEvent('CredentialStatusUpdated', Buffer.from(JSON.stringify(statusUpdatedPayload)));
+
+        return JSON.stringify(record);
+    }
+
+    /**
+     * Updates the status of an existing credential record (generic compatibility path).
+     * Retained for backward compatibility with Milestone 5 test harnesses.
      * Enforces valid lifecycle state transitions (ACTIVE, SUSPENDED, REVOKED) and terminal revocation.
      * Restricted strictly to the authenticated issuing organization (record.issuerOrg).
      *
@@ -457,6 +733,14 @@ export class IdentityRegistryContract extends Contract {
         const txTimestamp = getTxTimestampISO(ctx);
 
         record.status = parsedTargetStatus;
+        if (parsedTargetStatus === CredentialStatus.REVOKED) {
+            if (!record.revocationReason) {
+                record.revocationReason = RevocationReason.UNSPECIFIED;
+            }
+            if (!record.revokedAt) {
+                record.revokedAt = txTimestamp;
+            }
+        }
         record.updatedAt = txTimestamp;
         record.version += 1;
 
@@ -464,7 +748,7 @@ export class IdentityRegistryContract extends Contract {
         const updatedBytes = Buffer.from(stringify(sortKeysRecursive(record)));
         await ctx.stub.putState(compositeKey, updatedBytes);
 
-        // 6. Emit Status Update Event
+        // 6. Emit Status Update Events
         const eventPayload = {
             credentialId: record.credentialId,
             previousStatus,
@@ -475,7 +759,97 @@ export class IdentityRegistryContract extends Contract {
         };
         ctx.stub.setEvent('CredentialStatusUpdated', Buffer.from(JSON.stringify(eventPayload)));
 
+        if (parsedTargetStatus === CredentialStatus.REVOKED) {
+            const revokedPayload = {
+                credentialId: record.credentialId,
+                issuerOrg: record.issuerOrg,
+                previousStatus,
+                revocationReason: record.revocationReason,
+                revokedAt: record.revokedAt,
+                version: record.version
+            };
+            ctx.stub.setEvent('CredentialRevoked', Buffer.from(JSON.stringify(revokedPayload)));
+        } else if (parsedTargetStatus === CredentialStatus.SUSPENDED) {
+            const suspendedPayload = {
+                credentialId: record.credentialId,
+                issuerOrg: record.issuerOrg,
+                previousStatus,
+                reason: RevocationReason.UNSPECIFIED,
+                timestamp: txTimestamp,
+                version: record.version
+            };
+            ctx.stub.setEvent('CredentialSuspended', Buffer.from(JSON.stringify(suspendedPayload)));
+        } else if (parsedTargetStatus === CredentialStatus.ACTIVE) {
+            const reinstatedPayload = {
+                credentialId: record.credentialId,
+                issuerOrg: record.issuerOrg,
+                previousStatus,
+                timestamp: txTimestamp,
+                version: record.version
+            };
+            ctx.stub.setEvent('CredentialReinstated', Buffer.from(JSON.stringify(reinstatedPayload)));
+        }
+
         return JSON.stringify(record);
+    }
+
+    /**
+     * Lightweight read-only lifecycle status query.
+     * Retrieves the current on-chain lifecycle status without requiring subject DID or hash commitment.
+     * Evaluates effective expiration dynamically against deterministic transaction timestamp without mutating state.
+     *
+     * @param ctx Fabric transaction context
+     * @param credentialId Unique credential identifier
+     * @returns JSON-serialized CredentialStatusResult
+     */
+    @Transaction(false)
+    @Returns('string')
+    public async GetCredentialStatus(
+        ctx: Context,
+        credentialId: string
+    ): Promise<string> {
+        validateCredentialId(credentialId);
+
+        const compositeKey = ctx.stub.createCompositeKey(CREDENTIAL_OBJECT_TYPE, [credentialId.trim()]);
+        const recordBytes = await ctx.stub.getState(compositeKey);
+
+        if (!recordBytes || recordBytes.length === 0) {
+            throw new ChaincodeError(
+                ErrorCode.CREDENTIAL_NOT_FOUND,
+                `Credential record for ID "${credentialId}" does not exist on the ledger.`
+            );
+        }
+
+        const record: CredentialRecord = JSON.parse(Buffer.from(recordBytes).toString('utf8'));
+        const txTimestamp = getTxTimestampISO(ctx);
+
+        // Evaluate effective status: if stored ACTIVE but txTimestamp >= expiresAt, report effectiveStatus as EXPIRED
+        let effectiveStatus: string = record.status;
+        const txMillis = Date.parse(txTimestamp);
+        const expMillis = Date.parse(record.expiresAt);
+
+        if (record.status === CredentialStatus.ACTIVE && txMillis >= expMillis) {
+            effectiveStatus = 'EXPIRED';
+        }
+
+        const result: CredentialStatusResult = {
+            credentialId: record.credentialId,
+            status: record.status,
+            effectiveStatus,
+            issuerOrg: record.issuerOrg,
+            credentialType: record.credentialType,
+            issuedAt: record.issuedAt,
+            expiresAt: record.expiresAt,
+            version: record.version,
+            evaluatedAt: txTimestamp
+        };
+
+        if (record.status === CredentialStatus.REVOKED) {
+            result.revocationReason = record.revocationReason;
+            result.revokedAt = record.revokedAt;
+        }
+
+        return JSON.stringify(result);
     }
 
     /**

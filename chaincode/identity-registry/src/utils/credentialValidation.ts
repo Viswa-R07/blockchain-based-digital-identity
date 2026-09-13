@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { CredentialStatus } from '../models/credentialRecord';
+import { CredentialStatus, RevocationReason } from '../models/credentialRecord';
 import { ChaincodeError, ErrorCode } from './errors';
 
 const CREDENTIAL_ID_REGEX = /^[a-zA-Z0-9_.:-]+$/;
@@ -243,4 +243,38 @@ export function validateIssuerOrganization(callerMsp: string, credentialType: st
         ErrorCode.UNAUTHORIZED_CREDENTIAL_TYPE,
         `Organization "${callerMsp}" is not authorized to issue credentials of type "${credentialType}". Credential types must correspond to organizational domains.`
     );
+}
+
+/**
+ * Validates that the provided reason matches one of the controlled application revocation reason codes.
+ * Rejects empty strings, arbitrary free-text, unknown reason codes, and any reason containing PII patterns.
+ * No arbitrary free-text revocation reasons are allowed on-chain.
+ */
+export function validateRevocationReason(reason: string): RevocationReason {
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        throw new ChaincodeError(
+            ErrorCode.INVALID_REVOCATION_REASON,
+            'Revocation reason must be a non-empty controlled reason code'
+        );
+    }
+
+    const trimmed = reason.trim().toUpperCase();
+
+    // Primary privacy and security protection: enforce controlled application enum
+    if (!Object.values(RevocationReason).includes(trimmed as RevocationReason)) {
+        throw new ChaincodeError(
+            ErrorCode.INVALID_REVOCATION_REASON,
+            `Invalid revocation reason: "${reason}". Must be one of the controlled application reason codes: ${Object.values(RevocationReason).join(', ')}`
+        );
+    }
+
+    // Defense-in-depth: explicit rejection of obvious PII patterns
+    if (trimmed.includes('@') || /^\d{3}-\d{2}-\d{4}$/.test(trimmed)) {
+        throw new ChaincodeError(
+            ErrorCode.INVALID_REVOCATION_REASON,
+            'Revocation reason must not contain personal identifying information'
+        );
+    }
+
+    return trimmed as RevocationReason;
 }
