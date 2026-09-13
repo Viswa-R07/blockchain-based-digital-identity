@@ -1,0 +1,37 @@
+{
+  "name": "identity-registry",
+  "version": "2.0.0",
+  "description": "Identity Registry Chaincode for Blockchain-Based Digital Identity Verification System",
+  "main": "dist/index.js",
+  "typings": "dist/index.d.ts",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc -w",
+    "prepublishOnly": "npm run build",
+    "start": "fabric-chaincode-node start",
+    "test": "mocha -r ts-node/register 'tests/**/*.test.ts' --exit --timeout 10000"
+  },
+  "engineStrict": true,
+  "author": "Antigravity Identity Consortium",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "fabric-contract-api": "~2.5.3",
+    "fabric-shim": "~2.5.3",
+    "json-stringify-deterministic": "^1.0.1",
+    "sort-keys-recursive": "^2.1.2"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.3.11",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.0",
+    "@types/sinon": "^17.0.3",
+    "chai": "^4.4.1",
+    "mocha": "^10.3.0",
+    "sinon": "^17.0.1",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.3.3"
+  }
+}

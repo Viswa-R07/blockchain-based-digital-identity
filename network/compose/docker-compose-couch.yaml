@@ -1,0 +1,92 @@
+networks:
+  identity-network:
+    name: identity-network
+
+services:
+  couchdb0.gov:
+    image: couchdb:3.3.3
+    container_name: couchdb0.gov
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "5984:5984"
+    networks:
+      - identity-network
+
+  couchdb1.gov:
+    image: couchdb:3.3.3
+    container_name: couchdb1.gov
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "5985:5984"
+    networks:
+      - identity-network
+
+  couchdb0.uni:
+    image: couchdb:3.3.3
+    container_name: couchdb0.uni
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "6984:5984"
+    networks:
+      - identity-network
+
+  couchdb1.uni:
+    image: couchdb:3.3.3
+    container_name: couchdb1.uni
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "6985:5984"
+    networks:
+      - identity-network
+
+  couchdb0.bank:
+    image: couchdb:3.3.3
+    container_name: couchdb0.bank
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "7984:5984"
+    networks:
+      - identity-network
+
+  couchdb1.bank:
+    image: couchdb:3.3.3
+    container_name: couchdb1.bank
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "7985:5984"
+    networks:
+      - identity-network
+
+  couchdb0.emp:
+    image: couchdb:3.3.3
+    container_name: couchdb0.emp
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "8984:5984"
+    networks:
+      - identity-network
+
+  couchdb1.emp:
+    image: couchdb:3.3.3
+    container_name: couchdb1.emp
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "8985:5984"
+    networks:
+      - identity-network
