@@ -8,6 +8,7 @@ import { LifecycleController } from '../controllers/lifecycle.controller.js';
 import { VerificationController } from '../controllers/verification.controller.js';
 import storageRoutes from './storage.routes.js';
 import { authenticateApiKey } from '../middleware/auth.middleware.js';
+import { sensitiveLimiter, storageLimiter } from '../middleware/rateLimit.middleware.js';
 
 import { validateBody, zeroRawPiiGatekeeper } from '../middleware/validate.middleware.js';
 import {
@@ -26,6 +27,7 @@ router.use(authenticateApiKey);
 // 1. Issuance Endpoints (Server-Controlled Issuer Routing)
 router.post(
     '/government-id',
+    sensitiveLimiter.middleware(),
     zeroRawPiiGatekeeper,
     validateBody(IssueCredentialSchema),
     CredentialController.issueCredentialByType('government-id')
@@ -33,6 +35,7 @@ router.post(
 
 router.post(
     '/academic',
+    sensitiveLimiter.middleware(),
     zeroRawPiiGatekeeper,
     validateBody(IssueCredentialSchema),
     CredentialController.issueCredentialByType('academic')
@@ -40,6 +43,7 @@ router.post(
 
 router.post(
     '/kyc',
+    sensitiveLimiter.middleware(),
     zeroRawPiiGatekeeper,
     validateBody(IssueCredentialSchema),
     CredentialController.issueCredentialByType('kyc')
@@ -47,6 +51,7 @@ router.post(
 
 router.post(
     '/employment',
+    sensitiveLimiter.middleware(),
     zeroRawPiiGatekeeper,
     validateBody(IssueCredentialSchema),
     CredentialController.issueCredentialByType('employment')
@@ -55,6 +60,7 @@ router.post(
 // 2. Verification Endpoints (Read-Only)
 router.post(
     '/verify',
+    storageLimiter.middleware(),
     zeroRawPiiGatekeeper,
     validateBody(VerifyCredentialSchema),
     VerificationController.verifyCredential
@@ -69,6 +75,7 @@ router.get('/:credentialId', CredentialController.readCredential);
 // 4. Milestone 6 Explicit Lifecycle Mutations
 router.post(
     '/:credentialId/revoke',
+    sensitiveLimiter.middleware(),
     zeroRawPiiGatekeeper,
     validateBody(RevokeCredentialSchema),
     LifecycleController.revokeCredential
@@ -76,6 +83,7 @@ router.post(
 
 router.post(
     '/:credentialId/suspend',
+    sensitiveLimiter.middleware(),
     zeroRawPiiGatekeeper,
     validateBody(SuspendCredentialSchema),
     LifecycleController.suspendCredential
@@ -83,12 +91,14 @@ router.post(
 
 router.post(
     '/:credentialId/reinstate',
+    sensitiveLimiter.middleware(),
     LifecycleController.reinstateCredential
 );
 
 // 5. Generic Status Update (Milestone 5 Compatibility)
 router.patch(
     '/:credentialId/status',
+    sensitiveLimiter.middleware(),
     zeroRawPiiGatekeeper,
     validateBody(UpdateCredentialStatusSchema),
     LifecycleController.updateCredentialStatus
@@ -98,4 +108,3 @@ router.patch(
 router.use('/:credentialId', storageRoutes);
 
 export default router;
-

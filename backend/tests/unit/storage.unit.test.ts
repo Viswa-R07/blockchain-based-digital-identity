@@ -209,6 +209,190 @@ describe('Milestone 8: Encrypted File Storage & Controller Unit Tests', () => {
             expect(jsonBody.error).toBe('COMMITMENT_MISMATCH');
         });
 
+        it('should successfully store off-chain payload for ACTIVE and unexpired credential', async () => {
+            const validPayload = { degree: 'BSc Computer Science', honors: 'Cum Laude' };
+            const validCommitment = calculateCredentialCommitment(validPayload);
+
+            mockEvaluate = vi.spyOn(gatewayManager, 'getDefaultContract').mockReturnValue({
+                evaluateTransaction: vi.fn().mockResolvedValue(
+                    Buffer.from(
+                        JSON.stringify({
+                            credentialId: 'cred-active-01',
+                            issuerOrg: 'UniversityMSP',
+                            credentialCommitment: validCommitment,
+                            status: 'ACTIVE',
+                            expiresAt: '2035-01-01T00:00:00.000Z'
+                        })
+                    )
+                )
+            } as any);
+
+            const req: any = {
+                params: { credentialId: 'cred-active-01' },
+                body: validPayload,
+                user: { org: 'UniversityMSP', role: 'UNI_REGISTRAR' }
+            };
+
+            let status = 0;
+            let jsonBody: any = null;
+            const res: any = {
+                status: (s: number) => {
+                    status = s;
+                    return { json: (j: any) => { jsonBody = j; } };
+                }
+            };
+            const next = vi.fn();
+
+            await controller.storeCredential(req, res, next);
+
+            expect(status).toBe(201);
+            expect(jsonBody.data.stored).toBe(true);
+            expect(jsonBody.data.credentialId).toBe('cred-active-01');
+
+            // Confirm file was written
+            const exists = await storage.exists('cred-active-01');
+            expect(exists).toBe(true);
+
+            // Cleanup
+            await storage.delete('cred-active-01');
+        });
+
+        it('should reject off-chain storage request if credential is REVOKED and verify no file is written', async () => {
+            const validPayload = { idCard: 'ID-12345', citizenship: 'US' };
+            const validCommitment = calculateCredentialCommitment(validPayload);
+
+            mockEvaluate = vi.spyOn(gatewayManager, 'getDefaultContract').mockReturnValue({
+                evaluateTransaction: vi.fn().mockResolvedValue(
+                    Buffer.from(
+                        JSON.stringify({
+                            credentialId: 'cred-revoked-store-01',
+                            issuerOrg: 'GovMSP',
+                            credentialCommitment: validCommitment,
+                            status: 'REVOKED',
+                            expiresAt: '2035-01-01T00:00:00.000Z'
+                        })
+                    )
+                )
+            } as any);
+
+            const req: any = {
+                params: { credentialId: 'cred-revoked-store-01' },
+                body: validPayload,
+                user: { org: 'GovMSP', role: 'GOV_ADMIN' }
+            };
+
+            let status = 0;
+            let jsonBody: any = null;
+            const res: any = {
+                status: (s: number) => {
+                    status = s;
+                    return { json: (j: any) => { jsonBody = j; } };
+                }
+            };
+            const next = vi.fn();
+
+            await controller.storeCredential(req, res, next);
+
+            expect(status).toBe(403);
+            expect(jsonBody.error).toBe('CREDENTIAL_REVOKED');
+            expect(jsonBody.message).toContain('permanently REVOKED');
+
+            // Confirm NO storage write occurred
+            const exists = await storage.exists('cred-revoked-store-01');
+            expect(exists).toBe(false);
+        });
+
+        it('should reject off-chain storage request if credential is SUSPENDED and verify no file is written', async () => {
+            const validPayload = { kycTier: 'Tier-3', jurisdiction: 'FINCEN' };
+            const validCommitment = calculateCredentialCommitment(validPayload);
+
+            mockEvaluate = vi.spyOn(gatewayManager, 'getDefaultContract').mockReturnValue({
+                evaluateTransaction: vi.fn().mockResolvedValue(
+                    Buffer.from(
+                        JSON.stringify({
+                            credentialId: 'cred-suspended-store-01',
+                            issuerOrg: 'BankMSP',
+                            credentialCommitment: validCommitment,
+                            status: 'SUSPENDED',
+                            expiresAt: '2035-01-01T00:00:00.000Z'
+                        })
+                    )
+                )
+            } as any);
+
+            const req: any = {
+                params: { credentialId: 'cred-suspended-store-01' },
+                body: validPayload,
+                user: { org: 'BankMSP', role: 'BANK_COMPLIANCE' }
+            };
+
+            let status = 0;
+            let jsonBody: any = null;
+            const res: any = {
+                status: (s: number) => {
+                    status = s;
+                    return { json: (j: any) => { jsonBody = j; } };
+                }
+            };
+            const next = vi.fn();
+
+            await controller.storeCredential(req, res, next);
+
+            expect(status).toBe(403);
+            expect(jsonBody.error).toBe('CREDENTIAL_SUSPENDED');
+            expect(jsonBody.message).toContain('SUSPENDED');
+
+            // Confirm NO storage write occurred
+            const exists = await storage.exists('cred-suspended-store-01');
+            expect(exists).toBe(false);
+        });
+
+        it('should reject off-chain storage request if credential is EXPIRED and verify no file is written', async () => {
+            const validPayload = { corp: 'OmniCorp', tenure: '5 years' };
+            const validCommitment = calculateCredentialCommitment(validPayload);
+            const pastExpiration = new Date(Date.now() - 3600000).toISOString();
+
+            mockEvaluate = vi.spyOn(gatewayManager, 'getDefaultContract').mockReturnValue({
+                evaluateTransaction: vi.fn().mockResolvedValue(
+                    Buffer.from(
+                        JSON.stringify({
+                            credentialId: 'cred-expired-store-01',
+                            issuerOrg: 'EmployerMSP',
+                            credentialCommitment: validCommitment,
+                            status: 'ACTIVE',
+                            expiresAt: pastExpiration
+                        })
+                    )
+                )
+            } as any);
+
+            const req: any = {
+                params: { credentialId: 'cred-expired-store-01' },
+                body: validPayload,
+                user: { org: 'EmployerMSP', role: 'EMP_HR' }
+            };
+
+            let status = 0;
+            let jsonBody: any = null;
+            const res: any = {
+                status: (s: number) => {
+                    status = s;
+                    return { json: (j: any) => { jsonBody = j; } };
+                }
+            };
+            const next = vi.fn();
+
+            await controller.storeCredential(req, res, next);
+
+            expect(status).toBe(400);
+            expect(jsonBody.error).toBe('CREDENTIAL_EXPIRED');
+            expect(jsonBody.message).toContain('expired at');
+
+            // Confirm NO storage write occurred
+            const exists = await storage.exists('cred-expired-store-01');
+            expect(exists).toBe(false);
+        });
+
         it('should deny plaintext retrieval if credential is REVOKED', async () => {
             mockEvaluate = vi.spyOn(gatewayManager, 'getDefaultContract').mockReturnValue({
                 evaluateTransaction: vi.fn().mockResolvedValue(

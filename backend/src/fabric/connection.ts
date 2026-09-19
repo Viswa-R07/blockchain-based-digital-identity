@@ -20,6 +20,8 @@ export async function createGatewayConnection(config: OrgConfig): Promise<Gatewa
     logger.info(`Establishing Fabric Gateway connection for ${config.mspId} -> ${config.peerEndpoint} (${config.peerHostOverride})`);
 
     // Verify and read TLS CA certificate
+    // SEC-NET-01: Server-side TLS CA certificate validation over gRPC transport.
+    // Application proposals are signed with user identity credentials. Full transport mTLS is a future production hardening target.
     if (!fs.existsSync(config.tlsCertPath)) {
         throw new Error(`TLS certificate not found for ${config.mspId} at ${config.tlsCertPath}`);
     }

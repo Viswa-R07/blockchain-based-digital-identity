@@ -60,3 +60,65 @@ export const env = {
     CREDENTIAL_STORAGE_PATH: process.env.CREDENTIAL_STORAGE_PATH || path.resolve(__dirname, '../../../storage/credentials')
 };
 
+
+
+export const KNOWN_DEFAULT_SECRETS = new Set([
+    'gov-admin-secret-key-12345',
+    'uni-registrar-secret-key-12345',
+    'bank-compliance-secret-key-12345',
+    'emp-hr-secret-key-12345',
+    'verifier-public-secret-key-12345',
+    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    'key-dev-master-01'
+]);
+
+/**
+ * SEC-AUTH-03: Production environment secret validation.
+ * Enforces fail-fast startup behavior if production secrets are missing or default prototype values.
+ * Never prints secret values in error messages.
+ */
+export function validateEnvironment(config: typeof env): void {
+    if (config.NODE_ENV !== 'production') {
+        return; // Development / Test environments permit prototype configuration
+    }
+
+    const requiredApiKeys: Array<{ name: string; value: string }> = [
+        { name: 'API_KEY_GOV', value: config.API_KEY_GOV },
+        { name: 'API_KEY_UNI', value: config.API_KEY_UNI },
+        { name: 'API_KEY_BANK', value: config.API_KEY_BANK },
+        { name: 'API_KEY_EMP', value: config.API_KEY_EMP },
+        { name: 'API_KEY_VERIFIER', value: config.API_KEY_VERIFIER }
+    ];
+
+    for (const { name, value } of requiredApiKeys) {
+        if (!value || typeof value !== 'string') {
+            throw new Error(`Production configuration error: ${name} is not configured.`);
+        }
+        if (KNOWN_DEFAULT_SECRETS.has(value)) {
+            throw new Error(`Production configuration error: ${name} must not use prototype default value.`);
+        }
+        if (value.length < 16) {
+            throw new Error(`Production configuration error: ${name} has insufficient length (minimum 16 characters).`);
+        }
+    }
+
+    if (!config.STORAGE_MASTER_KEY || typeof config.STORAGE_MASTER_KEY !== 'string') {
+        throw new Error('Production configuration error: STORAGE_MASTER_KEY must be explicitly configured.');
+    }
+    if (KNOWN_DEFAULT_SECRETS.has(config.STORAGE_MASTER_KEY)) {
+        throw new Error('Production configuration error: STORAGE_MASTER_KEY must not use prototype default value.');
+    }
+    if (!/^[0-9a-fA-F]{64}$/.test(config.STORAGE_MASTER_KEY)) {
+        throw new Error('Production configuration error: STORAGE_MASTER_KEY must be a 64-character hex string (32 bytes).');
+    }
+
+    if (!config.STORAGE_KEY_ID || typeof config.STORAGE_KEY_ID !== 'string') {
+        throw new Error('Production configuration error: STORAGE_KEY_ID must be explicitly configured.');
+    }
+    if (KNOWN_DEFAULT_SECRETS.has(config.STORAGE_KEY_ID)) {
+        throw new Error('Production configuration error: STORAGE_KEY_ID must not use prototype default value.');
+    }
+}
+
+// Perform validation on module load
+validateEnvironment(env);

@@ -22,7 +22,7 @@ echo -e "${BLUE}==============================================================${
 EXPECTED_HEIGHT=${1:-""}
 
 # 1. Container Verification
-echo -e "\n${BLUE}[1/6] Verifying Running Docker Containers (Expected: 23)${NC}"
+echo -e "\n${BLUE}[1/6] Verifying Running Docker Containers (Expected: 27)${NC}"
 CONTAINER_COUNT=$(docker ps -q | wc -l)
 echo "Total running containers: ${CONTAINER_COUNT}"
 
@@ -63,10 +63,23 @@ for c in "${EXPECTED_CONTAINERS[@]}"; do
   fi
 done
 
-if [ "$MISSING" -eq 0 ] && [ "$CONTAINER_COUNT" -eq 23 ]; then
-  echo -e "${GREEN}>>> All 23 expected containers are active and running.${NC}"
+CC_ORGS=("gov" "university" "bank" "employer")
+for org in "${CC_ORGS[@]}"; do
+  if docker ps --format '{{.Names}}' | grep -q "dev-peer0\.${org}\..*identity-registry"; then
+    CC_NAME=$(docker ps --format '{{.Names}}' | grep "dev-peer0\.${org}\..*identity-registry" | head -1)
+    echo -e "  [+] ${CC_NAME} ... ${GREEN}RUNNING${NC}"
+  else
+    echo -e "  [-] dev-peer0.${org} chaincode (identity-registry) ... ${RED}MISSING/STOPPED${NC}"
+    MISSING=$((MISSING + 1))
+    ERRORS=$((ERRORS + 1))
+  fi
+done
+
+if [ "$MISSING" -eq 0 ] && [ "$CONTAINER_COUNT" -eq 27 ]; then
+  echo -e "${GREEN}>>> All 27 expected containers (23 Fabric nodes + 4 chaincode instances) are active and running.${NC}"
 else
-  echo -e "${RED}>>> Container verification failed! Missing: ${MISSING}, Total: ${CONTAINER_COUNT}${NC}"
+  echo -e "${RED}>>> Container verification failed! Missing: ${MISSING}, Total: ${CONTAINER_COUNT} (Expected: 27)${NC}"
+  ERRORS=$((ERRORS + 1))
 fi
 
 # 2. CouchDB Health & Ping

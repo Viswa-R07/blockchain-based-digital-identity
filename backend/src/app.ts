@@ -4,11 +4,22 @@
 
 import express, { Express, Request, Response } from 'express';
 import { errorHandler } from './middleware/errorHandler.middleware.js';
+import { generalLimiter } from './middleware/rateLimit.middleware.js';
+import { securityHeadersMiddleware } from './middleware/securityHeaders.middleware.js';
 import apiRouter from './routes/index.js';
 import { logger } from './utils/logger.js';
 
 export function createApp(): Express {
     const app = express();
+
+    // Disable technology fingerprinting
+    app.disable('x-powered-by');
+
+    // SEC-API-02: Security headers & CORS
+    app.use(securityHeadersMiddleware);
+
+    // SEC-API-01: General Rate Limiter (100 req/min/IP)
+    app.use(generalLimiter.middleware());
 
     app.use(express.json({ limit: '1mb' }));
     app.use(express.urlencoded({ extended: true }));

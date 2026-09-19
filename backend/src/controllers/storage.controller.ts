@@ -64,10 +64,11 @@ export class StorageController {
                 return;
             }
 
-            // 2. Enforce Storage Ownership: caller must be authoritative issuer org or admin
+            // 2. Enforce Storage Ownership: caller must be authoritative issuer org or admin (verifiers strictly excluded)
             const callerOrg = req.user?.org;
             const callerRole = req.user?.role;
-            if (callerOrg !== record.issuerOrg && callerRole !== 'GOV_ADMIN') {
+            const isVerifier = callerRole === 'VERIFIER' || callerOrg === 'VerifierOrg';
+            if (isVerifier || (callerOrg !== record.issuerOrg && callerRole !== 'GOV_ADMIN')) {
                 AuditLogger.logEvent('UNAUTHORIZED_STORAGE_ACCESS', {
                     credentialId,
                     org: callerOrg,
@@ -92,13 +93,56 @@ export class StorageController {
                 return;
             }
 
-            // 4. Encrypt payload using AES-256-GCM with AAD
+            // 4. Enforce Lifecycle State: Reject storage ingestion for REVOKED, SUSPENDED, or EXPIRED credentials
+            if (record.status === 'REVOKED') {
+                AuditLogger.logEvent('UNAUTHORIZED_STORAGE_ACCESS', {
+                    credentialId,
+                    org: callerOrg,
+                    role: callerRole,
+                    status: 'REVOKED',
+                    action: 'STORE',
+                    details: 'Cannot store off-chain payload for permanently REVOKED credential'
+                });
+                res.status(403).json({
+                    error: 'CREDENTIAL_REVOKED',
+                    message: `Credential ${credentialId} is permanently REVOKED and cannot be stored off-chain.`
+                });
+                return;
+            }
+
+            if (record.status === 'SUSPENDED') {
+                AuditLogger.logEvent('UNAUTHORIZED_STORAGE_ACCESS', {
+                    credentialId,
+                    org: callerOrg,
+                    role: callerRole,
+                    status: 'SUSPENDED',
+                    action: 'STORE',
+                    details: 'Cannot store off-chain payload for SUSPENDED credential'
+                });
+                res.status(403).json({
+                    error: 'CREDENTIAL_SUSPENDED',
+                    message: `Credential ${credentialId} is SUSPENDED. Storage is restricted.`
+                });
+                return;
+            }
+
+            const now = new Date();
+            const expiresAtDate = new Date(record.expiresAt);
+            if (now.getTime() > expiresAtDate.getTime()) {
+                res.status(400).json({
+                    error: 'CREDENTIAL_EXPIRED',
+                    message: `Credential ${credentialId} expired at ${record.expiresAt} (current server UTC: ${now.toISOString()}).`
+                });
+                return;
+            }
+
+            // 5. Encrypt payload using AES-256-GCM with AAD
             const { keyId, key } = await this.keyProvider.getKey();
             const version = 1;
             const aad = buildStorageAAD(credentialId, record.credentialCommitment, version);
             const encrypted = encryptPayload(payload, key, aad);
 
-            // 5. Construct and persist EncryptedStorageRecord
+            // 6. Construct and persist EncryptedStorageRecord
             const nowIso = new Date().toISOString();
             const storageRecord: EncryptedStorageRecord = {
                 credentialId,
@@ -147,6 +191,56 @@ export class StorageController {
     public getStorageMetadata = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
             const { credentialId } = req.params;
+
+            // 1. SEC-AUTHZ-03: Fetch authoritative Fabric record first
+            const contract = gatewayManager.getDefaultContract();
+            let fabricRecord: CredentialRecord | null = null;
+            try {
+                const fabricResult = await ContractService.evaluate<CredentialRecord>(
+                    contract,
+                    'ReadCredential',
+                    credentialId
+                );
+                fabricRecord = fabricResult.data;
+            } catch (err: any) {
+                res.status(404).json({
+                    error: 'NOT_FOUND',
+                    message: `Credential ${credentialId} not found on ledger.`
+                });
+                return;
+            }
+
+            if (!fabricRecord) {
+                res.status(404).json({
+                    error: 'NOT_FOUND',
+                    message: `Credential ${credentialId} not found on ledger.`
+                });
+                return;
+            }
+
+            // 2. SEC-AUTHZ-03 & Fix 4: Least-privilege metadata access
+            // Allowed: issuing organization or GOV_ADMIN. Denied: external verifier or unrelated org
+            const callerOrg = req.user?.org;
+            const callerRole = req.user?.role;
+            const isVerifier = callerRole === 'VERIFIER' || callerOrg === 'VerifierOrg';
+            const isAuthorized = !isVerifier && (callerOrg === fabricRecord.issuerOrg || callerRole === 'GOV_ADMIN');
+
+            if (!isAuthorized) {
+                AuditLogger.logEvent('UNAUTHORIZED_STORAGE_ACCESS', {
+                    credentialId,
+                    org: callerOrg,
+                    role: callerRole,
+                    action: 'GET_METADATA',
+                    details: 'Caller not authorized to view storage metadata'
+                });
+                res.status(403).json({
+                    error: 'FORBIDDEN',
+                    message: `Storage metadata access restricted to issuing organization (${fabricRecord.issuerOrg}) or administrator.`
+                });
+                return;
+            }
+
+            // 3. Retrieve off-chain storage record
             const record = await this.storage.retrieve(credentialId);
 
             if (!record) {
@@ -209,8 +303,8 @@ export class StorageController {
             const callerRole = req.user?.role;
 
             // 2. Authorization check: Plaintext retrieval restricted to issuer or admin (verifiers explicitly excluded)
-            const isVerifier = callerRole === 'VERIFIER';
-            const isAuthorizedIssuer = (callerOrg === record.issuerOrg && !isVerifier) || callerRole === 'GOV_ADMIN';
+            const isVerifier = callerRole === 'VERIFIER' || callerOrg === 'VerifierOrg';
+            const isAuthorizedIssuer = !isVerifier && (callerOrg === record.issuerOrg || callerRole === 'GOV_ADMIN');
 
             if (!isAuthorizedIssuer) {
                 AuditLogger.logEvent('UNAUTHORIZED_STORAGE_ACCESS', {
@@ -372,10 +466,11 @@ export class StorageController {
                 return;
             }
 
-            // 2. Ownership check: caller must be issuer org or admin
+            // 2. Ownership check: caller must be issuer org or admin (verifiers strictly excluded)
             const callerOrg = req.user?.org;
             const callerRole = req.user?.role;
-            if (callerOrg !== record.issuerOrg && callerRole !== 'GOV_ADMIN') {
+            const isVerifier = callerRole === 'VERIFIER' || callerOrg === 'VerifierOrg';
+            if (isVerifier || (callerOrg !== record.issuerOrg && callerRole !== 'GOV_ADMIN')) {
                 AuditLogger.logEvent('UNAUTHORIZED_STORAGE_ACCESS', {
                     credentialId,
                     org: callerOrg,

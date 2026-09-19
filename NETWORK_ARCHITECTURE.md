@@ -181,7 +181,7 @@ Instead, citizens interact with the system via an **Authorized Application Gatew
    |    e.g., 'app-gateway.gov')        |
    +------------------------------------+
                      |
-              gRPC with mTLS
+              gRPC with server-validated TLS (mTLS planned for production)
                      |
                      v
    +------------------------------------+
@@ -401,7 +401,11 @@ The architecture is built on strict data minimization: **Raw personal identity a
 
 ## 10. Private Data Collections (PDC) Architecture & Retention Policy
 
-Private Data Collections (PDCs) are used when sensitive bilateral verification metadata must be shared between a subset of organizations without broadcasting payloads to the entire consortium.
+> [!NOTE]
+> **Implementation Architecture Note (SEC-PDC-01)**:
+> The earlier PDC design was an architectural option. The implemented prototype uses encrypted off-chain storage for sensitive credential payloads. On-chain state holds only cryptographic identifiers, integrity commitments, and lifecycle status; sensitive plaintext claims are never written to peer state databases or transient collections.
+
+Private Data Collections (PDCs) are an architectural option for bilateral verification metadata when sensitive records must be partitioned across peer subsets without broadcasting payloads to the entire consortium.
 
 ```
 +----------------------------------------------------------------------------------------------------+

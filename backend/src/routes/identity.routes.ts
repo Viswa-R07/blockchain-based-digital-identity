@@ -4,7 +4,8 @@
 
 import { Router } from 'express';
 import { IdentityController } from '../controllers/identity.controller.js';
-import { authenticateApiKey } from '../middleware/auth.middleware.js';
+import { authenticateApiKey, requireOrg } from '../middleware/auth.middleware.js';
+import { sensitiveLimiter } from '../middleware/rateLimit.middleware.js';
 import { validateBody, zeroRawPiiGatekeeper } from '../middleware/validate.middleware.js';
 import { RegisterIdentitySchema, UpdateIdentityStatusSchema } from '../types/dtos.js';
 
@@ -15,6 +16,8 @@ router.use(authenticateApiKey);
 
 router.post(
     '/',
+    sensitiveLimiter.middleware(),
+    requireOrg('GovMSP'),
     zeroRawPiiGatekeeper,
     validateBody(RegisterIdentitySchema),
     IdentityController.registerIdentity
@@ -25,6 +28,8 @@ router.get('/:did/exists', IdentityController.identityExists);
 
 router.patch(
     '/:did/status',
+    sensitiveLimiter.middleware(),
+    requireOrg('GovMSP'),
     zeroRawPiiGatekeeper,
     validateBody(UpdateIdentityStatusSchema),
     IdentityController.updateIdentityStatus

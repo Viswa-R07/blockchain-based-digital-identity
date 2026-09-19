@@ -10,6 +10,15 @@ import { IdentityRecord } from '../types/index.js';
 export class IdentityController {
     public static async registerIdentity(req: Request, res: Response, next: NextFunction): Promise<void> {
         try {
+            // SEC-AUTHZ-01: Explicit defense-in-depth check: Civil identity registration strictly restricted to GovMSP GOV_ADMIN
+            if (req.user?.org !== 'GovMSP' || req.user?.role !== 'GOV_ADMIN') {
+                res.status(403).json({
+                    error: 'FORBIDDEN',
+                    message: `Identity registration is strictly restricted to GovMSP GOV_ADMIN. Caller authenticated as ${req.user?.org} (${req.user?.role}).`
+                });
+                return;
+            }
+
             const { did, identityCommitment } = req.body;
             // Strict server-side routing: Civil identity registration MUST use GovMSP gateway
             const contract = gatewayManager.getContract('GovMSP');
@@ -70,6 +79,15 @@ export class IdentityController {
 
     public static async updateIdentityStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
         try {
+            // SEC-AUTHZ-01: Explicit defense-in-depth check: Identity status updates strictly restricted to GovMSP GOV_ADMIN
+            if (req.user?.org !== 'GovMSP' || req.user?.role !== 'GOV_ADMIN') {
+                res.status(403).json({
+                    error: 'FORBIDDEN',
+                    message: `Identity status updates are strictly restricted to GovMSP GOV_ADMIN. Caller authenticated as ${req.user?.org} (${req.user?.role}).`
+                });
+                return;
+            }
+
             const { did } = req.params;
             const { status } = req.body;
             // Strict server-side routing: Identity status updates strictly restricted to GovMSP

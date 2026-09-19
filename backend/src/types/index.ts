@@ -3,6 +3,7 @@
  */
 
 export type OrgMspId = 'GovMSP' | 'UniversityMSP' | 'BankMSP' | 'EmployerMSP';
+export type ApplicationOrg = OrgMspId | 'VerifierOrg';
 
 export enum IdentityStatus {
     ACTIVE = 'ACTIVE',
@@ -88,7 +89,7 @@ export interface OrgConfig {
 }
 
 export interface AuthenticatedUser {
-    org: OrgMspId;
+    org: ApplicationOrg;
     role: string;
     apiKeyName: string;
 }

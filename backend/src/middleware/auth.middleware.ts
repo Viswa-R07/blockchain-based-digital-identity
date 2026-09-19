@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as crypto from 'crypto';
 import { NextFunction, Request, Response } from 'express';
 import { env } from '../config/env.js';
 import { AuthenticatedUser, OrgMspId } from '../types/index.js';
@@ -13,6 +14,23 @@ declare global {
             user?: AuthenticatedUser;
         }
     }
+}
+
+/**
+ * Constant-time comparison of two secrets using fixed-length SHA-256 digests.
+ * Prevents timing side-channel attacks on secret comparison.
+ * Never logs the candidate key.
+ */
+export function safeCompareSecret(candidate: unknown, expected: unknown): boolean {
+    if (typeof candidate !== 'string' || typeof expected !== 'string') {
+        return false;
+    }
+    if (!candidate || !expected) {
+        return false;
+    }
+    const candidateDigest = crypto.createHash('sha256').update(candidate, 'utf8').digest();
+    const expectedDigest = crypto.createHash('sha256').update(expected, 'utf8').digest();
+    return crypto.timingSafeEqual(candidateDigest, expectedDigest);
 }
 
 /**
@@ -46,16 +64,16 @@ export function authenticateApiKey(req: Request, res: Response, next: NextFuncti
 
     let user: AuthenticatedUser | undefined;
 
-    if (apiKey === env.API_KEY_GOV) {
+    if (safeCompareSecret(apiKey, env.API_KEY_GOV)) {
         user = { org: 'GovMSP', role: 'GOV_ADMIN', apiKeyName: 'GovernmentAuthorityKey' };
-    } else if (apiKey === env.API_KEY_UNI) {
+    } else if (safeCompareSecret(apiKey, env.API_KEY_UNI)) {
         user = { org: 'UniversityMSP', role: 'UNI_REGISTRAR', apiKeyName: 'UniversityRegistrarKey' };
-    } else if (apiKey === env.API_KEY_BANK) {
+    } else if (safeCompareSecret(apiKey, env.API_KEY_BANK)) {
         user = { org: 'BankMSP', role: 'BANK_COMPLIANCE', apiKeyName: 'BankComplianceKey' };
-    } else if (apiKey === env.API_KEY_EMP) {
+    } else if (safeCompareSecret(apiKey, env.API_KEY_EMP)) {
         user = { org: 'EmployerMSP', role: 'EMP_HR', apiKeyName: 'EmployerHrKey' };
-    } else if (apiKey === env.API_KEY_VERIFIER) {
-        user = { org: 'GovMSP', role: 'VERIFIER', apiKeyName: 'PublicVerifierKey' };
+    } else if (safeCompareSecret(apiKey, env.API_KEY_VERIFIER)) {
+        user = { org: 'VerifierOrg', role: 'VERIFIER', apiKeyName: 'PublicVerifierKey' };
     }
 
     if (!user) {
@@ -83,7 +101,7 @@ export function requireOrg(...allowedOrgs: OrgMspId[]) {
             return;
         }
 
-        if (!allowedOrgs.includes(req.user.org)) {
+        if (!allowedOrgs.includes(req.user.org as OrgMspId)) {
             res.status(403).json({
                 error: 'FORBIDDEN',
                 message: `Operation restricted to [${allowedOrgs.join(', ')}]. Caller is authenticated as ${req.user.org}.`

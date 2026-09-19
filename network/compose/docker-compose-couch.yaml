@@ -1,3 +1,12 @@
+# ==============================================================================
+# Hyperledger Fabric State Database (CouchDB) Topology - Milestone 9 Hardened
+#
+# SECURITY NOTICE (SEC-DB-01):
+# 1. Ports are bound strictly to loopback (127.0.0.1) to prevent administrative
+#    HTTP interface exposure on public or external network interfaces.
+# 2. In production, credentials (admin:adminpw) must be injected via Docker secrets
+#    or vault management. Current credentials are prototype-only.
+# ==============================================================================
 networks:
   identity-network:
     name: identity-network
@@ -10,7 +19,7 @@ services:
       - COUCHDB_USER=admin
       - COUCHDB_PASSWORD=adminpw
     ports:
-      - "5984:5984"
+      - "127.0.0.1:5984:5984"
     networks:
       - identity-network
 
@@ -21,7 +30,7 @@ services:
       - COUCHDB_USER=admin
       - COUCHDB_PASSWORD=adminpw
     ports:
-      - "5985:5984"
+      - "127.0.0.1:5985:5984"
     networks:
       - identity-network
 
@@ -32,7 +41,7 @@ services:
       - COUCHDB_USER=admin
       - COUCHDB_PASSWORD=adminpw
     ports:
-      - "6984:5984"
+      - "127.0.0.1:6984:5984"
     networks:
       - identity-network
 
@@ -43,7 +52,7 @@ services:
       - COUCHDB_USER=admin
       - COUCHDB_PASSWORD=adminpw
     ports:
-      - "6985:5984"
+      - "127.0.0.1:6985:5984"
     networks:
       - identity-network
 
@@ -54,7 +63,7 @@ services:
       - COUCHDB_USER=admin
       - COUCHDB_PASSWORD=adminpw
     ports:
-      - "7984:5984"
+      - "127.0.0.1:7984:5984"
     networks:
       - identity-network
 
@@ -65,7 +74,7 @@ services:
       - COUCHDB_USER=admin
       - COUCHDB_PASSWORD=adminpw
     ports:
-      - "7985:5984"
+      - "127.0.0.1:7985:5984"
     networks:
       - identity-network
 
@@ -76,7 +85,7 @@ services:
       - COUCHDB_USER=admin
       - COUCHDB_PASSWORD=adminpw
     ports:
-      - "8984:5984"
+      - "127.0.0.1:8984:5984"
     networks:
       - identity-network
 
@@ -87,6 +96,6 @@ services:
       - COUCHDB_USER=admin
       - COUCHDB_PASSWORD=adminpw
     ports:
-      - "8985:5984"
+      - "127.0.0.1:8985:5984"
     networks:
       - identity-network
