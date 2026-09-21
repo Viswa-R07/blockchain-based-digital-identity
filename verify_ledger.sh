@@ -75,6 +75,7 @@ echo "STEP 6: POST-CREATE QUERY (Verify newly created asset7)"
 echo "========================================================="
 ASSET7=$(peer chaincode query -C mychannel -n basic -c '{"Args":["ReadAsset","asset7"]}')
 echo "Newly Created Asset7:"
+
 echo "$ASSET7" | jq .
 
 echo ""
